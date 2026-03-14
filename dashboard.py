@@ -227,11 +227,35 @@ with col_gauge:
     st.plotly_chart(fig_gauge, use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# Export for AI (sidebar — needs data loaded)
+# Export section (sidebar — needs data loaded)
 # ---------------------------------------------------------------------------
 st.sidebar.markdown("---")
-st.sidebar.subheader("Export for AI")
-st.sidebar.caption("Download a briefing you can paste into ChatGPT, Claude, Gemini, etc.")
+st.sidebar.subheader("Export Data")
+
+# --- Raw data CSV export ---
+_export_days = st.sidebar.selectbox("Export range", [30, 60, 90, 180, 365], index=0)
+_export_cols = ["composite", "regime", "turbulence_z", "credit_stress",
+                "financial_rel", "software_rel", "alt_manager_rel",
+                "btc_rel", "corr_break"]
+_export_cols = [c for c in _export_cols if c in features.columns]
+_export_df = (
+    features[_export_cols]
+    .dropna(subset=["composite"])
+    .tail(_export_days)
+    .round(4)
+)
+_export_df.index.name = "date"
+_csv_data = _export_df.to_csv()
+st.sidebar.download_button(
+    label=f"Download Raw Data CSV ({_export_days}d)",
+    data=_csv_data,
+    file_name=f"turbulence_raw_{_export_days}d_{snap['date']}.csv",
+    mime="text/csv",
+)
+
+# --- AI briefing text export ---
+st.sidebar.markdown("")
+st.sidebar.caption("Or get a pre-formatted briefing to paste into any AI chatbot:")
 _briefing_text = _build_ai_briefing(features, snap)
 st.sidebar.download_button(
     label="Download AI Briefing (.txt)",
