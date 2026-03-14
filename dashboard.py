@@ -71,6 +71,112 @@ st.sidebar.caption(
 )
 
 # ---------------------------------------------------------------------------
+# Export for AI helper
+# ---------------------------------------------------------------------------
+
+def _build_ai_briefing(features: pd.DataFrame, snap: dict) -> str:
+    """Build a plain-text market briefing suitable for pasting into any AI chat."""
+    from datetime import date as _date
+
+    sub_fields = [
+        ("Base Turbulence z-score",          "turbulence_z"),
+        ("Credit Stress (HYG vs LQD)",       "credit_stress"),
+        ("Financial Sector Rel Perf",        "financial_rel"),
+        ("Software/Tech Sector Rel Perf",    "software_rel"),
+        ("Alt-Manager Basket Rel Perf",      "alt_manager_rel"),
+        ("BTC Liquidity Proxy",              "btc_rel"),
+        ("Correlation Break Score",          "corr_break"),
+    ]
+
+    # 5-day trend
+    recent = features["composite"].dropna().tail(6)
+    trend = recent.diff().mean()
+    if trend > 0.05:
+        trend_desc = f"RISING (+{trend:.3f}/day) — stress is increasing"
+    elif trend < -0.05:
+        trend_desc = f"FALLING ({trend:.3f}/day) — stress is decreasing"
+    else:
+        trend_desc = f"FLAT ({trend:+.3f}/day) — little change"
+
+    # 30-day high/low
+    recent_30 = features["composite"].dropna().tail(30)
+    high_30 = recent_30.max()
+    low_30 = recent_30.min()
+
+    # Build sub-factor lines
+    sub_lines = []
+    for label, key in sub_fields:
+        v = snap.get(key)
+        if v is not None and not (isinstance(v, float) and pd.isna(v)):
+            level = "ELEVATED" if v >= 2 else "MODERATE" if v >= 1 else "NORMAL"
+            sub_lines.append(f"  - {label}: {v:+.2f} ({level})")
+
+    # Recent regime history (last 10 days)
+    recent_hist = features[["composite", "regime"]].dropna(subset=["composite"]).tail(10)
+    hist_lines = []
+    for dt, row in recent_hist.iterrows():
+        hist_lines.append(f"  {dt.strftime('%Y-%m-%d')}: {row['composite']:.2f} ({row['regime']})")
+
+    briefing = f"""MARKET TURBULENCE BRIEFING
+========================
+Generated: {_date.today().isoformat()}
+Data as of: {snap['date']}
+
+CURRENT STATUS
+--------------
+Composite Fragility Score: {snap.get('composite', 0):.2f}
+Regime: {snap.get('regime', 'UNKNOWN')}
+5-Day Trend: {trend_desc}
+30-Day Range: {low_30:.2f} (low) to {high_30:.2f} (high)
+
+REGIME SCALE
+------------
+GREEN  (< 1.0) = Normal / calm markets
+YELLOW (1.0-2.0) = Caution / elevated uncertainty
+ORANGE (2.0-3.0) = Fragility / significant stress
+RED    (>= 3.0) = Turbulence / crisis-level stress
+
+SUB-FACTOR BREAKDOWN
+--------------------
+(Positive values = stress; higher = worse)
+{chr(10).join(sub_lines)}
+
+COMPOSITE WEIGHTS
+-----------------
+  - Base Turbulence: 35%
+  - Credit Stress: 20%
+  - Financial Sector: 15%
+  - Software/Tech Sector: 15%
+  - Correlation Breaks: 10%
+  - BTC Liquidity: 5%
+
+LAST 10 TRADING DAYS
+--------------------
+{chr(10).join(hist_lines)}
+
+ASSETS MONITORED
+----------------
+Equities: SPY, QQQ, IWM | Bonds: TLT, HYG, LQD | Commodities: GLD, USO
+Currency: UUP | Sectors: XLF, KRE, IGV, ARKK | Alt Managers: BX, KKR, APO, ARES
+Crypto: BTC-USD
+
+METHOD
+------
+The composite score uses Mahalanobis-distance turbulence (Ledoit-Wolf
+covariance) combined with cross-asset relative performance signals and
+rolling correlation break detection. All sub-factors are z-scored against
+their own 126-day history.
+
+---
+Please analyze this market data and provide your assessment of:
+1. Current market risk level and what is driving it
+2. Which asset classes or sectors look most vulnerable
+3. Suggested portfolio positioning (aggressive, neutral, or defensive)
+4. Any warning signs or opportunities you see in the sub-factors
+"""
+    return briefing
+
+# ---------------------------------------------------------------------------
 # Data load (cached)
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner="Computing turbulence signals…")
@@ -119,6 +225,22 @@ with col_gauge:
     ))
     fig_gauge.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=0))
     st.plotly_chart(fig_gauge, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# Export for AI (sidebar — needs data loaded)
+# ---------------------------------------------------------------------------
+st.sidebar.markdown("---")
+st.sidebar.subheader("Export for AI")
+st.sidebar.caption("Download a briefing you can paste into ChatGPT, Claude, Gemini, etc.")
+_briefing_text = _build_ai_briefing(features, snap)
+st.sidebar.download_button(
+    label="Download AI Briefing (.txt)",
+    data=_briefing_text,
+    file_name=f"turbulence_briefing_{snap['date']}.txt",
+    mime="text/plain",
+)
+if st.sidebar.checkbox("Show briefing text (copy-paste)", value=False):
+    st.sidebar.text_area("AI Briefing", value=_briefing_text, height=300)
 
 st.divider()
 
